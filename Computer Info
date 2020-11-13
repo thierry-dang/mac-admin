@@ -1,0 +1,173 @@
+#!/bin/bash
+
+<<ABOUT_THIS_SCRIPT
+-----------------------------------------------------------------------
+	Written by:William Smith
+	Professional Services Engineer
+	Jamf
+	bill@talkingmoose.net
+	https://github.com/talkingmoose/Jamf-Scripts
+	
+	Originally posted: August 13, 2018
+	Updated: January 11, 2020
+	Purpose: Display a dialog to end users with computer information when
+	run from within Jamf Pro Self Service. Useful for Help Desks to
+	ask end users to run when troubleshooting.
+	Except where otherwise noted, this work is licensed under
+	http://creativecommons.org/licenses/by/4.0/
+	"they're good dogs Brent"
+  
+  
+  PS: I've added a DNS variable to the script
+	
+-----------------------------------------------------------------------
+ABOUT_THIS_SCRIPT
+
+
+# if reporting on Active Directory domain
+adDomain="mydomain.com"
+netbiosDomain=""
+
+# if using mailto option
+supportEmail="address@mydomain.com"
+
+## General section #####
+
+# Display computer name
+runCommand=$( /usr/sbin/scutil --get ComputerName )
+computerName="Computer Name: $runCommand"
+
+
+# Display serial number
+runCommand=$( /usr/sbin/system_profiler SPHardwareDataType | /usr/bin/grep "Serial Number" | /usr/bin/awk -F ": " '{ print $2 }' )
+serialNumber="Serial Number: $runCommand"
+
+
+# Display uptime
+runCommand=$( /usr/bin/uptime | /usr/bin/awk -F "(up |, [0-9] users)" '{ print $2 }' )
+if [[ "$runCommand" = *day* ]] || [[ "$runCommand" = *sec* ]] || [[ "$runCommand" = *min* ]] ; then
+	upTime="Uptime: $runCommand"
+else
+	upTime="Uptime: $runCommand hrs/min"
+fi
+
+## Network section #####
+
+
+# Display active network services and IP Addresses
+
+networkServices=$( /usr/sbin/networksetup -listallnetworkservices | /usr/bin/grep -v asterisk )
+
+while IFS= read aService
+do
+	activePort=$( /usr/sbin/networksetup -getinfo "$aService" | /usr/bin/grep "IP address" | /usr/bin/grep -v "IPv6" )
+	if [ "$activePort" != "" ] && [ "$activeServices" != "" ]; then
+		activeServices="$activeServices\n$aService $activePort"
+	elif [ "$activePort" != "" ] && [ "$activeServices" = "" ]; then
+		activeServices="$aService $activePort"
+	fi
+done <<< "$networkServices"
+
+activeServices=$( echo "$activeServices" | /usr/bin/sed '/^$/d')
+
+
+# Display Wi-Fi SSID
+model=$( /usr/sbin/system_profiler SPHardwareDataType | /usr/bin/grep 'Model Name' )
+
+if [[ "$model" = *Book* ]]; then
+	runCommand=$( /usr/sbin/networksetup -getairportnetwork en0 | /usr/bin/awk -F ": " '{ print $2 }' )
+else
+	runCommand=$( /usr/sbin/networksetup -getairportnetwork en1 | /usr/bin/awk -F ": " '{ print $2 }' )
+fi
+
+SSID="SSID: $runCommand"
+
+
+# Display SSH status
+runCommand=$( /usr/sbin/systemsetup -getremotelogin | /usr/bin/awk -F ": " '{ print $2 }' ) 
+SSH="SSH: $runCommand"
+
+# Display Wifi DNS Settings
+runCommand=$( networksetup -getdnsservers Wi-Fi ) 
+DNS="DNS: $runCommand"
+
+# Display date, time and time zone
+runCommand=$( /bin/date )
+timeInfo="Date and Time: $runCommand"
+
+
+# Display network time server
+runCommand=$( /usr/sbin/systemsetup -getnetworktimeserver )
+timeServer="$runCommand"
+
+
+## Hardware/Software section #####
+
+
+# Display free space
+FreeSpace=$( /usr/sbin/diskutil info / | /usr/bin/grep  -E 'Free Space|Available Space|Container Free Space' | /usr/bin/awk -F ":\s*" '{ print $2 }' | awk -F "(" '{ print $1 }' | xargs )
+FreeBytes=$( /usr/sbin/diskutil info / | /usr/bin/grep -E 'Free Space|Available Space|Container Free Space' | /usr/bin/awk -F "(\\\(| Bytes\\\))" '{ print $2 }' )
+DiskBytes=$( /usr/sbin/diskutil info / | /usr/bin/grep -E 'Total Space' | /usr/bin/awk -F "(\\\(| Bytes\\\))" '{ print $2 }' )
+FreePercentage=$(echo "scale=2; $FreeBytes*100/$DiskBytes" | bc)
+diskSpace="Disk Space: $FreeSpace free (${FreePercentage}% available)"
+
+
+# Display operating system
+runCommand=$( /usr/bin/sw_vers -productVersion)
+operatingSystem="Operating System: $runCommand"
+
+
+# Display battery cycle count
+runCommand=$( /usr/sbin/ioreg -r -c "AppleSmartBattery" | /usr/bin/grep '"CycleCount" = ' | /usr/bin/awk '{ print $3 }' | /usr/bin/sed s/\"//g )
+batteryCycleCount="Battery Cycle Count: $runCommand"
+
+
+
+## Format information #####
+
+
+displayInfo="----------------------------------------------
+GENERAL
+$computerName
+$serialNumber
+$upTime
+----------------------------------------------
+NETWORK
+$activeServices
+$SSID
+$DNS
+$SSH
+$timeInfo
+$timeServer
+----------------------------------------------
+HARDWARE/SOFTWARE
+$diskSpace
+$operatingSystem
+$batteryCycleCount
+----------------------------------------------"
+
+
+
+## Display information to end user #####
+
+runCommand="button returned of (display dialog \"$displayInfo\" with title \"Computer Information\" with icon file posix file \"/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.icns\" buttons {\"Send to IT Helpdesk\", \"OK\"} default button {\"OK\"})"
+clickedButton=$( /usr/bin/osascript -e "$runCommand" )
+
+## Run additional commands #####
+
+
+if [ "$clickedButton" = "Send to IT Helpdesk" ]; then
+
+	# open a remote support application
+	# /usr/bin/open -a "/Applications/TeamViewer.app"
+
+	# run a policy to enable remote support
+	# /usr/local/bin/jamf policy -event EnableRemoteSupport
+	
+	# email computer information to help desk
+	currentUser=$( stat -f "%Su" /dev/console )
+	sudo -u "$currentUser" /usr/bin/open "mailto:$supportEmail?subject=Computer Information ($serialNumber)&body=$displayInfo"
+	
+fi
+
+exit 0
