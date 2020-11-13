@@ -1,0 +1,6 @@
+NetworkServices=`networksetup -listallnetworkservices`
+
+if [[ $NetworkServices =~ "Wi-Fi" ]];then
+    networksetup -setdnsservers Wi-Fi empty
+    echo "Reset DNS Servers for Wi-Fi"
+fi
