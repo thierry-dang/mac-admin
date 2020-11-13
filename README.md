@@ -5,6 +5,3 @@ Scripts listed in this repository are mainly shared publicly by Jamf Nation comm
 In some cases, I added personal customizations and enhancements. 
 
 All credits goes to the original member of the community.
-
-Members listed here:
-https://github.com/talkingmoose/
